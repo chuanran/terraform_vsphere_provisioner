@@ -49,8 +49,8 @@ The deployment manifest file is located under `config/terraform.tfvars.json`, an
 
 ```
 {
-    "vsphere_vcenter": "10.65.59.161",
-    "vsphere_user": "administrator@fss.ibm.com.local",
+    "vsphere_vcenter": "<vsphere_vcenter_ip_to_be_replaced>",
+    "vsphere_user": "<vsphere_user_to_be_replaced>",
     "vsphere_password": "vsphere_password_to_be_replaced",
     "vsphere_source_datacenter": "1414775-WDC04-FCI",
     "vsphere_source_vm_folder": "folder_path_hosting_source_vms_to_be_replaced",
@@ -67,7 +67,7 @@ The deployment manifest file is located under `config/terraform.tfvars.json`, an
     "vmuser": "root",
     "product_initials": "dd",
     "product_version": "110",
-    "customer_env_name": "santander",
+    "customer_env_name": "<customer_name>",
     "env_type": "preprod",
     "vms_meta":[
         {
@@ -199,17 +199,17 @@ if you want to clone/provision a vm to any one of the host servers under a speci
         
          "vsphere_compute_cluster": "1143(FCDD-Backend)Cluster",
 
-(6). The network related configuration: `vsphere_sl_private_network_name`, `vm_sl_private_netmask` and `vm_network_gateway`.  `vsphere_sl_private_network_name` is the vsphere network adapter name (such as `DPortGroup_mgmt2`) for softlayer network (please notice that we only have 1 softlayer adapter attached to the FCI VMs), and you can find it in vsphere; `vm_sl_private_netmask` is the SL network mask number, where you can find it in softlayer portal, such as `26`; `vm_network_gateway` is the network gateway ip for SL network, where you can find it in softlayer portal, such as `10.170.176.129`  
+(6). The network related configuration: `vsphere_sl_private_network_name`, `vm_sl_private_netmask` and `vm_network_gateway`.  `vsphere_sl_private_network_name` is the vsphere network adapter name (such as `DPortGroup_mgmt2`) for softlayer network (please notice that we only have 1 softlayer adapter attached to the FCI VMs), and you can find it in vsphere; `vm_sl_private_netmask` is the SL network mask number, where you can find it in softlayer portal, such as `26`; `vm_network_gateway` is the network gateway ip for SL network, where you can find it in softlayer portal  
 
 (7). The dns domain related configuration: `virtual_machine_search_domain` and `vsphere_dns_domain`. `virtual_machine_search_domain` is the dns search domain you want to configure in `/etc/resolv.conf`, such as `wfss.ibm.com`; `vsphere_dns_domain` is the dns domain name for thee vm, which will be displayed as a postfix in vm's hostname or `hostname -f`
 
-(8). The name convention of inventory name and hostname for the vms. The vm's inventory name follows this convention: `{product_initials}-{product_version}-{customer_env_name}-{env_type}-{vm_type}`, where `product_initials` stands the initials of the product, which could be one of `dd, si, cfm, ai`, etc; `product_version` is the version of product, i.e. 110, etc; `customer_env_name` is the customer name, such as one of `regions, mizuho, santander, zions, tryandbuy, devops`, etc; `env_type` means the type/purpose of the environment, like one of `test, poc, dev, preprod, prod`, etc; `vm_type` (defines in `distinct configuration` part `vms_meta`, and the value is defined in `vm_type`) means the type of the vm, such as one of `km, kw, nfs1, nfs2, wexc, wexm, kwdd`, etc. Please notice that if there are more than 1 vm for a specific type (normally there will be more than 1 kube worker vms and more than 1 kube_worker_dd vms), the name of the vm will be the one appending an index after `vm_type`, for example `kw1,  kw2, kwdd1, kwdd2`, etc. 
+(8). The name convention of inventory name and hostname for the vms. The vm's inventory name follows this convention: `{product_initials}-{product_version}-{customer_env_name}-{env_type}-{vm_type}`, where `product_initials` stands the initials of the product, which could be one of `dd, si, cfm, ai`, etc; `product_version` is the version of product, i.e. 110, etc; `customer_env_name` is the customer name; `env_type` means the type/purpose of the environment, like one of `test, poc, dev, preprod, prod`, etc; `vm_type` (defines in `distinct configuration` part `vms_meta`, and the value is defined in `vm_type`) means the type of the vm, such as one of `km, kw, nfs1, nfs2, wexc, wexm, kwdd`, etc. Please notice that if there are more than 1 vm for a specific type (normally there will be more than 1 kube worker vms and more than 1 kube_worker_dd vms), the name of the vm will be the one appending an index after `vm_type`, for example `kw1,  kw2, kwdd1, kwdd2`, etc. 
 
-For example, for following example, the vm name should be `dd-110-santander-preprod-km`, and the hostname should be the combination of the vm name and the `vsphere_dns_domain`. for example, if the `vsphere_dns_domain` is `wfss.ibm.com`, then the hostname of the vm will be automatically set to `dd-110-santander-preprod-km.wfss.ibm.com`
+For example, for following example, the vm name should be `dd-110-<customer_name>-preprod-km`, and the hostname should be the combination of the vm name and the `vsphere_dns_domain`. for example, if the `vsphere_dns_domain` is `wfss.ibm.com`, then the hostname of the vm will be automatically set to `dd-110-<customer_name>-preprod-km.wfss.ibm.com`
 
     "product_initials": "dd",
     "product_version": "110",
-    "customer_env_name": "santander",
+    "customer_env_name": "<customer_name>",
     "env_type": "preprod",
     "vms_meta":[
         {
@@ -399,36 +399,22 @@ Everytime you use TFD to provision a new environment, you can consider use TFD t
    2.3. ldap check for management server: need to run ansible playbook against management server: `Ansible/playbooks/WFSS/wfss-zabbix-config-mgmt.yml`  
    
    Note: when leverage ansible playbooks to deploy monitor scripts to target VMs, need to follow the following steps:  
-   a. Login to js1 server (10.65.59.151), and launch an ansible docker container by using `"docker run --name <ansible_container_name>  -v /srv/docker/Ansible/:/opt/ansible -it ansible"` (give a unique name for `ansible_container_name`);    
+   a. Login to js1 server, and launch an ansible docker container by using `"docker run --name <ansible_container_name>  -v /srv/docker/Ansible/:/opt/ansible -it ansible"` (give a unique name for `ansible_container_name`);    
    
    b. add your private ssh key into ssh session: `ssh-add /opt/ansible/keys/<private_key_file>`;    
    
    c. make sure the environment ansible stanza exists in `/etc/ansible/hosts` file, if not exist there, you need either run the ansible script `generate_ansible_stanza.sh` to generate it, or manually create it and put it into `/etc/ansible/hosts`;  
    
-   d. run the corresponding ansible playbook such as: `ansible-playbook -vvv --extra-vars "variable_host=fci-103-statefarm-poc" wfss-chage-monitor.yml`, which will run the password check ansible playbook against all the statefarm 103 poc vms.  
+   d. run the corresponding ansible playbook such as: `ansible-playbook -vvv --extra-vars "variable_host=<host_group_name>" wfss-chage-monitor.yml`, which will run the password check ansible playbook against all the vms.  
 
 3. Add the corresponding host group into Zabbix Action `TIP.Action.ServiceNow`, `TIP.Action.ServiceNow.PagerDuty`. (Automation is not ready yet, still a little cautious about automating the last Action enablement). Detailed steps as following:   
-   3.1. Login to http://z3-devops-vvm-wash4.wfss.ibm.com/, go to `Configuration -> Actions` tab, and locate the Action `TIP.Action.ServiceNow` and `TIP.Action.ServiceNow.PagerDuty`:  
-   ![image](https://media.github.ibm.com/user/9055/files/cbc63200-0932-11ea-9765-060b31dd7cef)
+   3.1. Login to zabbix portal, go to `Configuration -> Actions` tab, and locate the Action `TIP.Action.ServiceNow` and `TIP.Action.ServiceNow.PagerDuty`:  
+   
 
    3.2. Click Action `TIP.Action.ServiceNow`,  `TIP.Action.ServiceNow.PagerDuty` respectively, and create a new `condition`: `"Host group"` `"equals"` the host group you want to add here. Theen click `Add` and `update` to save the changes.
-   ![image](https://media.github.ibm.com/user/9055/files/ddf59f80-0935-11ea-97a8-8c022129511d)
+  
 
 4. Add the corresponding host group into the user group `WFSS Cloud Ops - Read Write`, which can make sure the whole team members have access to the corresponding host group. Can login  to zabbix portal and follow the following red rectangle part to add corresponding host group into the user group and then  grant the group `Read Write` permission:
 
-![image](https://media.github.ibm.com/user/9055/files/e8d05e80-0bd9-11ea-8e2d-956a8f8f67f6)
-![image](https://media.github.ibm.com/user/9055/files/70699d80-0bd9-11ea-8799-7f0d42cc7502)
-![image](https://media.github.ibm.com/user/9055/files/8d05d580-0bd9-11ea-98b4-3ba68b94a772)  
+5. Once step 1, 2, 3 and 4 finished, go to zabbix portal, to validate if the zabbix configuration is configured as expected; Pay attention to the alerts that could come from the environment to see if zabbix is really integrated successfully with the env.  
 
-5. Once step 1, 2, 3 and 4 finished, go to http://z3-devops-vvm-wash4.wfss.ibm.com/, to validate if the zabbix configuration is configured as expected; Pay attention to the alerts that could come from the environment to see if zabbix is really integrated successfully with the env.  
-
-## Install FCI platform  
-For FCI kubernetes platform install, we normally follow this link for september release: https://github.ibm.com/fci-essentials/wiki/wiki/Installing-FCI-1.1.0-September-2019-APAR-Platform-Kubernetes-in-FCI-Softlayer-Cloud, and Basically after TFD provision finished, we only need to do step 15 to run the install directly: https://github.ibm.com/fci-essentials/wiki/wiki/Installing-FCI-1.1.0-September-2019-APAR-Platform-Kubernetes-in-FCI-Softlayer-Cloud#15-run-the-install
-
-
-## Install HDP platform  
-For HDP platform install, need confirm with dev team which runbook we need to follow. For september 2019 release,we follow this link to install hdp platform install: https://github.ibm.com/fci-essentials/wiki/wiki/Installing-FCI-1.1.0-September,-2019-APAR-(referred-to-as-September-2019-Release)-Hadoop-FCI-Data-Platform-in-Softlayer#obtain-the-media. Basically after TFD provision finished, for HDP platform install, you only need to do things in step 14: https://github.ibm.com/fci-essentials/wiki/wiki/Installing-FCI-1.1.0-September,-2019-APAR-(referred-to-as-September-2019-Release)-Hadoop-FCI-Data-Platform-in-Softlayer#obtain-the-media
-
-## Install other FCI verticals
-
-TFD currently supports Insurance, Due Diligence vertical install well, and the only thing left for installing those verticals is to launch the corresponding installation script. However there could be other manual steps needed, so always reach out to dev team to get the corresponding runbook for those vertical installs.
