@@ -1,0 +1,4 @@
+provisioner "file" {
+    source = "files/fci-hadoop.prod.hosts.properties"
+    destination = "/opt/ibm/fci/install/fci-hadoop.prod.hosts.properties"
+}

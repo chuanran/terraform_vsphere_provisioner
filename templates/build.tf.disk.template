@@ -1,0 +1,6 @@
+disk {
+    label = "disk{i}"
+    unit_number={i}
+    size = "${data.vsphere_virtual_machine.template.disks.{i}.size}"
+    thin_provisioned = true
+  }

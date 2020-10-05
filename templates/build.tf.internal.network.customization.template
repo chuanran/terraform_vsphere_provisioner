@@ -1,0 +1,4 @@
+network_interface {
+        ipv4_address = "${var.vm_kube_internal_ip}"
+        ipv4_netmask = "${var.vm_kube_internal_netmask}"
+      }

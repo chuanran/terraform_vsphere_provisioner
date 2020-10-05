@@ -1,0 +1,17 @@
+provider "vsphere" {
+  user           = "${var.vsphere_user}"
+  password       = "${var.vsphere_password}"
+  vsphere_server = "${var.vsphere_vcenter}"
+
+  # If you have a self-signed cert
+  allow_unverified_ssl = true
+}
+
+data "vsphere_tag_category" "category" {
+  name = "ansible"
+}
+
+resource "vsphere_tag" "allhosts_tag" {
+  name        = "${var.allhosts_vm_tag_name}"
+  category_id = "${data.vsphere_tag_category.category.id}"
+}

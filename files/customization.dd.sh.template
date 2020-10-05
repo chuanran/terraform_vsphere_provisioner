@@ -1,0 +1,139 @@
+#!/bin/bash
+#This script is used to leverage TFD to customise configurations on fci Due Diligence
+fci_install_kit_dir="/root/fci-install-kit"
+fcdd_install_kit_dir="/root/fcdd-install-kit"
+km_hosts_prop_template_file="${fci_install_kit_dir}/helm/install.hosts.properties.template"
+custom_nfs_fcdd_file="${fcdd_install_kit_dir}/helm/CustomNFS-fcdd.yaml"
+#step 1. For Due Diligence, do the corresponding customization on helm config and properties file
+#step 1.1 For Due Diligence, copy generated install.hosts.properties to the corresponding dd folder
+km_fcdd_hosts_prop_file="${fcdd_install_kit_dir}/helm/install.hosts.properties"
+if [ -f "$km_fcdd_hosts_prop_file" ]; then
+    if [ ! -s "$km_hosts_prop_template_file" ]; then
+        echo "Attention!!! km template hosts prop file $km_hosts_prop_template_file failed to be copied to the vm. You may need to manually get it and put it on the vm"
+    else
+        cp $km_fcdd_hosts_prop_file "${km_fcdd_hosts_prop_file}.bak"
+        sed -i '/^[[:space:]]*$/d' $km_hosts_prop_template_file
+        cp $km_hosts_prop_template_file $km_fcdd_hosts_prop_file
+    fi
+else
+    echo "This is not km server, or $km_fcdd_hosts_prop_file does NOT exist.  skipping fcdd hosts prop file generation"
+fi
+#step 1.2 on km, for ${fcdd_install_kit_dir}/helm/install.properties, change external.docker.registry.url to the km hostname
+km_fcdd_install_prop_file="${fcdd_install_kit_dir}/helm/install.properties"
+if [ -s "$km_fcdd_install_prop_file" ]; then
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    km_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-km/")
+    nfs2_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-nfs2/")
+    grep -Eq "^external.docker.registry.url =" $km_fcdd_install_prop_file
+    if [ $? -eq 0 ]; then
+        old_km_hostname=$(grep -E "^external.docker.registry.url =" $km_fcdd_install_prop_file | awk -F "=" '{print $2}' | awk -F ":" '{print $1}' |  awk '{print $1}')
+        sed -i "s/$old_km_hostname/$km_hostname/g" $km_fcdd_install_prop_file
+    else
+        echo "external.docker.registry.url = ${km_hostname}:5000" >> $km_fcdd_install_prop_file
+    fi
+    grep -Eq "^external.nfsserver =" $km_fcdd_install_prop_file
+    if [ $? -eq 0 ]; then
+        old_nfs2_hostname=$(grep -E "^external.nfsserver =" $km_fcdd_install_prop_file | awk -F "=" '{print $2}' |  awk '{print $1}')
+        sed -i "s/$old_nfs2_hostname/$nfs2_hostname/g" $km_fcdd_install_prop_file
+    else
+        echo "external.nfsserver = ${nfs2_hostname}" >> $km_fcdd_install_prop_file
+    fi
+
+    grep -qE "^mount_point.1 = --path" $km_fcdd_install_prop_file
+    if [ $? -eq 0 ]; then
+        sed -i "/^mount_point.1 = --path/c mount_point.1 = --path /fcidd/fcdd-node-instance" $km_fcdd_install_prop_file
+    else
+        echo "mount_point.1 = --path /fcidd/fcdd-node-instance" >> $km_fcdd_install_prop_file
+    fi
+
+    grep -qE "^mount_point.2 = --path" $km_fcdd_install_prop_file
+    if [ $? -eq 0 ]; then
+        sed -i "/^mount_point.2 = --path/c mount_point.2 = --path /fcidd/fcdd-ml" $km_fcdd_install_prop_file
+    else
+        echo "mount_point.2 = --path /fcidd/fcdd-ml" >> $km_fcdd_install_prop_file
+    fi
+
+    grep -qE "^chart.args =" ${km_fcdd_install_prop_file}
+    if [ $? -eq 0 ]; then
+        sed -i '/^chart.args =/c\chart.args = -f fcdd-values.yaml -f CustomNFS-fcdd.yaml --set global.coreReleaseName=fci/' ${km_fcdd_install_prop_file}
+    else
+        echo "chart.args = -f fcdd-values.yaml -f CustomNFS-fcdd.yaml --set global.coreReleaseName=fci" >> ${km_fcdd_install_prop_file}
+    fi
+fi
+
+#step 1.3 update datasource configuration in fcdd-values.yaml file
+helm_fcdd_values_file="${fcdd_install_kit_dir}/helm/fcdd-values.yaml"
+if [ -s "$helm_fcdd_values_file" ]; then
+    #change DNB_USERNAME, DNB_PASSWORD to the correct value defined in custom.properties file
+    grep "DNB_USERNAME:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_dnb_user_str=$(grep "DNB_USERNAME:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_dnb_user_str/DNB_USERNAME: '{new_dnb_user}'/g" $helm_fcdd_values_file
+    fi
+    grep "DNB_PASSWORD:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_dnb_pwd_str=$(grep "DNB_PASSWORD:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_dnb_pwd_str/DNB_PASSWORD: '{new_dnb_password}'/g" $helm_fcdd_values_file
+    fi
+    #change DOWJONES_USERNAME, DOWJONES_PASSWORD to the correct value defined in custom.properties file
+    grep "DOWJONES_USERNAME:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_dj_user_str=$(grep "DOWJONES_USERNAME:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_dj_user_str/DOWJONES_USERNAME: '{new_dj_user}'/g" $helm_fcdd_values_file
+    fi
+    grep "DOWJONES_PASSWORD:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_dj_pwd_str=$(grep "DOWJONES_PASSWORD:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_dj_pwd_str/DOWJONES_PASSWORD: '{new_dj_password}'/g" $helm_fcdd_values_file
+    fi
+    #change KYCKR_USERNAME, KYCKR_PASSWORD to the correct value defined in custom.properties file
+    grep "KYCKR_USERNAME:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_kyckr_user_str=$(grep "KYCKR_USERNAME:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_kyckr_user_str/KYCKR_USERNAME: '{new_kyckr_user}'/g" $helm_fcdd_values_file
+    fi
+    grep "KYCKR_PASSWORD:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_kyckr_pwd_str=$(grep "KYCKR_PASSWORD:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_kyckr_pwd_str/KYCKR_PASSWORD: '{new_kyckr_password}'/g" $helm_fcdd_values_file
+    fi
+    #change FACTIVA_EID, FACTIVA_NEWS_ENCRYTED_TOKEN_VALUE to the correct value defined in custom.properties file
+    grep "FACTIVA_EID:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_factiva_eid_str=$(grep "FACTIVA_EID:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_factiva_eid_str/FACTIVA_EID: '{new_factiva_eid}'/g" $helm_fcdd_values_file
+    fi
+    grep "FACTIVA_NEWS_ENCRYTED_TOKEN_VALUE:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_factiva_token_str=$(grep "FACTIVA_NEWS_ENCRYTED_TOKEN_VALUE:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_factiva_token_str/FACTIVA_NEWS_ENCRYTED_TOKEN_VALUE: '{new_factiva_token}'/g" $helm_fcdd_values_file
+    fi
+    #change BING_NEWS_SUBSCRIPTION_KEY_V7, BING_WEB_SUBSCRIPTION_KEY_V7 to the correct value defined in custom.properties file
+    grep "BING_NEWS_SUBSCRIPTION_KEY_V7:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_bing_news_key=$(grep "BING_NEWS_SUBSCRIPTION_KEY_V7:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_bing_news_key/BING_NEWS_SUBSCRIPTION_KEY_V7: '{new_bing_news_key}'/g" $helm_fcdd_values_file
+    fi
+    grep "BING_WEB_SUBSCRIPTION_KEY_V7:" $helm_fcdd_values_file | grep -qv "[[:space:]]#"
+    if [ $? -eq 0 ]; then
+        old_bing_web_key=$(grep "BING_WEB_SUBSCRIPTION_KEY_V7:" $helm_fcdd_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+        sed -i "s/$old_bing_web_key/BING_WEB_SUBSCRIPTION_KEY_V7: '{new_bing_web_key}'/g" $helm_fcdd_values_file
+    fi
+fi
+
+# step 1.4: Ensure the CustomNFS-fcdd.yaml exists with correct configuration
+
+echo "mlDataPvNfsPath: /fcidd/fcdd-ml" > ${custom_nfs_fcdd_file}
+echo "wexPvNfsPath: /fcidd/fcdd-wex" >> ${custom_nfs_fcdd_file}
+echo "nodejsPvNfsPath: /fcidd/fcdd-node-instance" >> ${custom_nfs_fcdd_file}
+echo "mongodbPvNfsPath: /fcidd/fcdd-mongo-data" >> ${custom_nfs_fcdd_file}
+echo "libertyPvNfsPath: /fcidd/fcdd-liberty-instance" >> ${custom_nfs_fcdd_file}
+
+
+#step 1.5 make sure .acceptLicenseInformation.lock and .acceptLicenseAgreement.lock are created to ignore license accepting
+if [ ! -f "${fcdd_install_kit_dir}/helm/.acceptLicenseInformation.lock" ]; then
+    touch ${fcdd_install_kit_dir}/helm/.acceptLicenseInformation.lock
+fi
+if [ ! -f "${fcdd_install_kit_dir}/helm/.acceptLicenseAgreement.lock" ]; then
+    touch ${fcdd_install_kit_dir}/helm/.acceptLicenseAgreement.lock
+fi

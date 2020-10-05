@@ -1,0 +1,35 @@
+### BEGIN: dd-110-santander-preprod ###
+[dd-110-santander-preprod]
+kube_master_softlayer_ip_to_be_replaced #dd-110-santander-preprod-km
+db_dd_softlayer_ip_to_be_replaced #dd-110-santander-preprod-db
+docreg_softlayer_ip_to_be_replaced #dd-110-santander-preprod-docreg
+mgmt_softlayer_ip_to_be_replaced #dd-110-santander-preprod-mgmt
+nfs1_softlayer_ip_to_be_replaced #dd-110-santander-preprod-nfs1
+nfs2_softlayer_ip_to_be_replaced #dd-110-santander-preprod-nfs2
+wexc_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexc
+wexfp_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexfp
+wexm_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexm
+web_softlayer_ip_to_be_replaced #dd-110-santander-preprod-web
+[dd-110-santander-preprod-db]
+db_dd_softlayer_ip_to_be_replaced #dd-110-santander-preprod-db
+[dd-110-santander-preprod-km]
+kube_master_softlayer_ip_to_be_replaced #dd-110-santander-preprod-km
+[dd-110-santander-preprod-kube]
+kube_master_softlayer_ip_to_be_replaced #dd-110-santander-preprod-km
+[dd-110-santander-preprod-mgmt]
+mgmt_softlayer_ip_to_be_replaced #dd-110-santander-preprod-mgmt
+[dd-110-santander-preprod-nfs1]
+nfs1_softlayer_ip_to_be_replaced #dd-110-santander-preprod-nfs1
+[dd-110-santander-preprod-nfs2]
+nfs2_softlayer_ip_to_be_replaced #dd-110-santander-preprod-nfs2
+[dd-110-santander-preprod-wca]
+wexc_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexc
+wexfp_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexfp
+wexm_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexm
+[dd-110-santander-preprod-wexc]
+wexc_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexc
+[dd-110-santander-preprod-wexfp]
+wexfp_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexfp
+[dd-110-santander-preprod-wexm]
+wexm_softlayer_ip_to_be_replaced #dd-110-santander-preprod-wexm
+### END: dd-110-santander-preprod ###

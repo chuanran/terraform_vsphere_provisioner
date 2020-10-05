@@ -1,0 +1,48 @@
+#vsphere access vars
+variable "vsphere_vcenter" {}
+variable "vsphere_user" {}
+variable "vsphere_password" {}
+
+#vsphere host, compute cluster,host folder, datastore, datacenter
+#compute_cluster_vm_host_variables 
+variable "vsphere_target_datastore" {}
+variable "vsphere_target_datacenter" {}
+variable "vsphere_target_vm_folder" {
+        description = "In which folder the VM will be stored"
+}
+
+#vsphere source virtual machine vars
+variable "vsphere_vm_template" {}
+variable "vsphere_vm_hostname" {}
+variable "vsphere_source_datacenter" {}
+variable "vsphere_source_vm_folder" {}
+
+#vsphere target virtual machine basic vars
+variable "vsphere_vm_count" {}
+variable "vm_cpu" {}
+variable "vm_memory" {}
+variable "vsphere_disks_count" {}
+variable "vsphere_target_vm_name" {}
+variable "allhosts_vm_tag_name" {}
+
+#target virtual machine network vars
+variable "vsphere_sl_private_network_name" {}
+variable "vm_sl_private_ip" {}
+variable "vm_sl_private_netmask" {}
+#kube_internal_network_variables
+variable "vm_network_gateway" {}
+variable "vsphere_dns_servers" {
+        description = "DNS server list"
+        type = "list"
+}
+variable "virtual_machine_search_domain" {
+        description = "DNS search domain list"
+        type = "list"
+}
+variable "vsphere_dns_domain" {}
+
+
+# vm ssh user/password definition
+variable "vmuser" {}
+variable "vmpassword" {}
+

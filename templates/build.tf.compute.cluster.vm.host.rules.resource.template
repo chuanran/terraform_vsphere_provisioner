@@ -1,0 +1,18 @@
+resource "vsphere_compute_cluster_vm_group" "cluster_vm_group" {
+  name                = "terraform-test-cluster-vm-group-${var.vsphere_target_vm_name}"
+  compute_cluster_id  = "${data.vsphere_compute_cluster.cluster.id}"
+  virtual_machine_ids = ["${vsphere_virtual_machine.vm.id}"]
+}
+
+resource "vsphere_compute_cluster_host_group" "cluster_host_group" {
+  name               = "terraform-test-cluster-host-group-${var.vsphere_target_vm_name}"
+  compute_cluster_id = "${data.vsphere_compute_cluster.cluster.id}"
+  host_system_ids    = ["${data.vsphere_host.host.id}"]
+}
+
+resource "vsphere_compute_cluster_vm_host_rule" "cluster_vm_host_rule" {
+  compute_cluster_id       = "${data.vsphere_compute_cluster.cluster.id}"
+  name                     = "terraform-test-cluster-vm-host-rule-${var.vsphere_target_vm_name}"
+  vm_group_name            = "${vsphere_compute_cluster_vm_group.cluster_vm_group.name}-${var.vsphere_target_vm_name}"
+  affinity_host_group_name = "${vsphere_compute_cluster_host_group.cluster_host_group.name}"
+}

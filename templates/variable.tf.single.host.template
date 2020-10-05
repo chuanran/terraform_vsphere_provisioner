@@ -1,0 +1,2 @@
+variable "vsphere_host" {}
+variable "vsphere_host_folder" {}

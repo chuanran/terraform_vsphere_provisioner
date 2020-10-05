@@ -1,0 +1,4 @@
+data "vsphere_host" "host" {
+  name          = "${var.vsphere_host}"
+  datacenter_id = "${data.vsphere_datacenter.target_dc.id}"
+}

@@ -1,0 +1,350 @@
+#!/bin/bash
+#This script is used to leverage TFD to customise configurations on kubernetes platform
+cur_dir=$(cd `dirname $0` && pwd)
+fci_media_dir="/fcimedia/fci"
+fci_install_kit_dir="/root/fci-install-kit"
+#customization for kube master helm properties files
+fci_install_helm_dir="/root/fci-install-kit/helm"
+helm_install_prop_file="${fci_install_helm_dir}/install.properties"
+helm_fci_values_file="${fci_install_helm_dir}/fci-values.yaml"
+
+checksum_file="CC39WEN.tar"
+fci_install_kit_tar_file="CC39BEN.tar"
+
+# Extract the media 
+if [ -d "${fci_media_dir}" ]; then
+    if [ -s "${fci_media_dir}/${checksum_file}" ]; then
+        tar -xvf ${fci_media_dir}/${checksum_file} -C /fcimedia/fci
+        if [ -s "${fci_media_dir}/${fci_install_kit_tar_file}" ]; then
+            (cd $HOME; tar -O -xf ${fci_media_dir}/${fci_install_kit_tar_file} fci-install-kit.tar.gz | tar xzf -)
+        fi
+    else
+        echo "Ensure the tar file - ${checksum_file} exists in the ${fci_media_dir} directory"
+        exit 1
+    fi
+fi
+
+# Copy keystsore files and certs
+if [ -d "/opt/fci_keystore" ]; then
+    #backup original secrets
+    if [ ! -d ${fci_install_helm_dir}/secrets-original ]; then
+        mkdir -p ${fci_install_helm_dir}/secrets-original
+    fi
+    cp ${fci_install_helm_dir}/secrets/*.* ${fci_install_helm_dir}/secrets-original
+    #copy the transferred fci secrets to the correct helm folder
+    cp /opt/fci_keystore/*.* ${fci_install_helm_dir}/secrets
+else
+    echo "fci keystore secrets failed to be transferred to kube master vm"
+fi
+
+if [ -s "$helm_install_prop_file" ]; then
+    #step 1. make sure external.nfsserver points to nfs1 server hostname in ${fci_install_kit_dir}/helm/install.properties
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    nfs1_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-nfs1/")
+    grep -Eq "^external.nfsserver =" $helm_install_prop_file
+    if [ $? -eq 0 ]; then
+        grep -Eq "^external.nfsserver = ${nfs1_hostname}" $helm_install_prop_file
+        if [ $? -ne 0 ]; then
+            sed -i "/^external.nfsserver =/c external.nfsserver = ${nfs1_hostname}" $helm_install_prop_file
+        fi
+    else
+        echo "external.nfsserver = ${nfs1_hostname}" >> $helm_install_prop_file
+    fi
+
+    # New changes for August APAR
+
+    sed -i 's/fci-exports/fcicore/' ${helm_install_prop_file}
+    sed -i 's/^mount_point/#mount_point/g' ${helm_install_prop_file}
+    sed -i 's/^k8s.pod_cidr = 10/#k8s.pod_cidr = 10/g' ${helm_install_prop_file}
+    sed -i 's/^k8s.svc_cidr = 10/#k8s.svc_cidr = 10/g' ${helm_install_prop_file}
+    sed -i 's/^k8s.dns_ip = 10/#k8s.dns_ip = 10/g' ${helm_install_prop_file}
+    sed -i 's/^k8s.calico_etcd_ip = 10/#k8s.calico_etcd_ip = 10/g' ${helm_install_prop_file}
+
+    grep -qw "^k8s.pod_cidr = 172" ${helm_install_prop_file}
+    if [ $? -ne 0 ]; then
+        grep -qw "^#k8s.pod_cidr = 172" ${helm_install_prop_file}
+        if [ $? -eq 0 ]; then
+            sed -i 's/^#k8s.pod_cidr = 172/k8s.pod_cidr = 172/g' ${helm_install_prop_file}
+        else
+            echo "k8s.pod_cidr = 172.30.48.0/20" >> ${helm_install_prop_file}
+        fi
+    fi
+
+    grep -qw "^k8s.svc_cidr = 172" ${helm_install_prop_file}
+    if [ $? -ne 0 ]; then
+        grep -qw "^#k8s.svc_cidr = 172" ${helm_install_prop_file}
+        if [ $? -eq 0 ]; then
+            sed -i 's/^#k8s.svc_cidr = 172/k8s.svc_cidr = 172/g' ${helm_install_prop_file}
+        else
+            echo "k8s.svc_cidr = 172.30.32.0/20" >> ${helm_install_prop_file}
+        fi
+    fi
+
+    grep -qw "^k8s.dns_ip = 172" ${helm_install_prop_file}
+    if [ $? -ne 0 ]; then
+        grep -qw "^#k8s.dns_ip = 172" ${helm_install_prop_file}
+        if [ $? -eq 0 ]; then
+            sed -i 's/^#k8s.dns_ip = 172/k8s.dns_ip = 172/g' ${helm_install_prop_file}
+        else
+            echo "k8s.dns_ip = 172.30.32.10" >> ${helm_install_prop_file}
+        fi
+    fi
+
+    grep -qw "^k8s.calico_etcd_ip = 172" ${helm_install_prop_file}
+    if [ $? -ne 0 ]; then
+        grep -qw "^#k8s.calico_etcd_ip = 172" ${helm_install_prop_file}
+        if [ $? -eq 0 ]; then
+            sed -i 's/^#k8s.calico_etcd_ip = 172/k8s.calico_etcd_ip = 172/g' ${helm_install_prop_file}
+        else
+            echo "k8s.calico_etcd_ip = 172.30.32.136" >> ${helm_install_prop_file}
+        fi
+    fi
+
+    grep -qE "^chart.args = -f fci-values.yaml" ${helm_install_prop_file}
+    if [ $? -eq 0 ]; then
+        sed -i 's/^chart.args = -f fci-values.yaml$/#chart.args = -f fci-values.yaml/' ${helm_install_prop_file}
+    fi
+
+    grep -qE "^# chart.args = -f fci-values.yaml -f CustomNFS-core.yaml$" ${helm_install_prop_file}
+    if [ $? -eq 0 ]; then
+        sed -i 's/^# chart.args = -f fci-values.yaml -f CustomNFS-core.yaml$/chart.args = -f fci-values.yaml -f CustomNFS-core.yaml/' ${helm_install_prop_file}
+    else
+        grep -qE "^chart.args = -f fci-values.yaml -f CustomNFS-core.yaml" ${helm_install_prop_file}
+        if [ $? -ne 0 ]; then
+            echo "chart.args = -f fci-values.yaml -f CustomNFS-core.yaml" >> ${helm_install_prop_file}
+        fi
+    fi
+
+    # New changes for August APAR
+
+    #step 2. For Due diligence, generate taint and label definition for kw_dd in install.properties, based on the count of kw and kwdd vms
+    if [ "{product_type}" == "dd" ]; then
+        for (( counter=1; counter<={kwdd_vm_count}; counter++ ))
+        do
+            ((kwdd_index={kw_vm_count}+counter))
+            grep -Eq "^taint.${counter} =" $helm_install_prop_file
+            if [ $? -eq 0 ]; then
+                grep -Eq "^taint.${counter} = -node worker.${kwdd_index} -key dedicated -value internet -effect NoSchedule" $helm_install_prop_file
+                if [ $? -ne 0 ]; then
+                    sed -i "/^taint.${counter} =/c taint.${counter} = -node worker.${kwdd_index} -key dedicated -value internet -effect NoSchedule" $helm_install_prop_file
+                fi
+            else
+                echo "taint.${counter} = -node worker.${kwdd_index} -key dedicated -value internet -effect NoSchedule" >> $helm_install_prop_file
+            fi
+            grep -Eq "^label.${counter} =" $helm_install_prop_file
+            if [ $? -eq 0 ]; then
+                grep -Eq "^label.${counter} = -node worker.${kwdd_index} -key dedicated -value internet" $helm_install_prop_file
+                if [ $? -ne 0 ]; then
+                    sed -i "/^label.${counter} =/c label.${counter} = -node worker.${kwdd_index} -key dedicated -value internet" $helm_install_prop_file
+                fi
+            else
+                echo "label.${counter} = -node worker.${kwdd_index} -key dedicated -value internet" >> $helm_install_prop_file
+            fi
+        done
+    fi
+fi
+
+#step 3. make sure ${fci_install_kit_dir}/helm/fci-values.yaml contains the correct properties
+if [ -s "$helm_fci_values_file" ]; then
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    web_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-web/")
+    km_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-km/")
+    mgmt_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-mgmt/")
+    hdpm_vm_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-hdpm/")
+    hdpg_vm_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-hdpg/")
+    hdpsec_vm_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-hdpsec/")
+    hdpa_password_base64=$(echo {hdpa_vm_password} | base64)
+    hdpm_password_base64=$(echo {hdpm_vm_password} | base64)
+
+    #step 3.1: modified "webProxyServer:" to use the web server's hostname
+    grep "webProxyServer:" $helm_fci_values_file | grep -qv "#"
+    if [ $? -eq 0 ]; then
+        sed -i "/^  webProxyServer:/c\  webProxyServer: \'"$web_hostname"\'" $helm_fci_values_file
+        # webproxyserver_old_hostname=$(grep "webProxyServer: " $helm_fci_values_file | grep -v "#" | head -n 1 | awk -F ":" '{print $2}' |  awk '{print $1}')
+        # sed -i "s/$webproxyserver_old_hostname/$web_hostname/g" $helm_fci_values_file
+    fi
+    #step 3.2. for "EXTERNAL://{kube_master_hostname}:$((31090 + ${KAFKA_BROKER_ID}))", change to use the correct km_hostname
+    grep "EXTERNAL://" $helm_fci_values_file | grep -qv "#"
+    if [ $? -eq 0 ]; then
+        old_km_hostname=$(grep "EXTERNAL://" $helm_fci_values_file | grep -v "#" | awk -F "//" '{print $2}' | awk -F ":" '{print $1}')
+        sed -i "s/$old_km_hostname/$km_hostname/g" $helm_fci_values_file
+    fi
+    #step 3.3. for LDAP_SERVER_HOST, change to use the correct LDAP_SERVER_HOST
+    # grep "LDAP_SERVER_HOST: " $helm_fci_values_file | grep -qv "#"
+    # if [ $? -eq 0 ]; then
+    #     old_mgmt_hostname=$(grep "LDAP_SERVER_HOST: " $helm_fci_values_file | grep -v "#" | awk -F "'" '{print $2}' | awk '{print $1}')
+    #     sed -i "s/$old_mgmt_hostname/$mgmt_hostname/g" $helm_fci_values_file
+    # fi
+
+    grep -qw "LDAP_SERVER_HOST:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_SERVER_HOST:/c\  LDAP_SERVER_HOST: '${mgmt_hostname}'" ${helm_fci_values_file}
+    fi
+    
+    grep -qw "IDENTITY_SERVER_TYPE:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/IDENTITY_SERVER_TYPE:/c\  IDENTITY_SERVER_TYPE: 'sds'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_SERVER_BINDDN:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_SERVER_BINDDN:/c\  LDAP_SERVER_BINDDN: 'cn=bind'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_SERVER_BINDCREDENTIALS:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_SERVER_BINDCREDENTIALS:/c\  LDAP_SERVER_BINDCREDENTIALS: 'NzhCZG5zQXM1VQ=='" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_SERVER_SEARCHBASE:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_SERVER_SEARCHBASE:/c\  LDAP_SERVER_SEARCHBASE: 'OU=FCI,O=IBM,C=US'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_PROFILE_DISPLAYNAME:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_PROFILE_DISPLAYNAME:/c\  LDAP_PROFILE_DISPLAYNAME: 'cn'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_PROFILE_EMAIL:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_PROFILE_EMAIL:/c\  LDAP_PROFILE_EMAIL: 'mail'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_PROFILE_GROUPS:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_PROFILE_GROUPS:/c\  LDAP_PROFILE_GROUPS: 'ibm-allGroups'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_PROFILE_ID:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_PROFILE_ID:/c\  LDAP_PROFILE_ID: 'uid'" ${helm_fci_values_file}
+    fi
+
+    grep -qw "LDAP_SERVER_USERNAME_MAPPING:" ${helm_fci_values_file}
+    if [ $? -eq 0 ]; then
+        sed -i "/LDAP_SERVER_USERNAME_MAPPING:/c\  LDAP_SERVER_USERNAME_MAPPING: 'uid'" ${helm_fci_values_file}
+    fi
+
+    # change the LDAP "node: information for the correct location of "groups and roles"
+    sed -i 's/CN=Users,DC=aml,DC=ibm,DC=com/ou=Groups,ou=FCI,o=IBM,c=US/' ${helm_fci_values_file}
+
+    #step 3.4. change JWT_KEY_EXPIRY to the correct value defined in custom.properties file
+    old_jwt_expiry_str=$(grep "JWT_KEY_EXPIRY:" $helm_fci_values_file | grep -v "[[:space:]]#" | sed -e 's/^[ \t]*//')
+    sed -i "s/$old_jwt_expiry_str/JWT_KEY_EXPIRY: '{jwt_new_expiry}'/g" $helm_fci_values_file
+    # CEDM Configuration for hadoop
+    if [ "{product_type}" == "si" ] || [ "{product_type}" == "ai" ] || [ "{product_type}" == "fcii" ] ; then
+        grep -qw "HDP_MASTER_IP:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/HDP_MASTER_IP:/c\    HDP_MASTER_IP: '{hdpm_vm_sl_private_ip}'" ${helm_fci_values_file}
+        fi
+        grep -qw "HDP_MASTER_PASSWORD:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/HDP_MASTER_PASSWORD:/c\    HDP_MASTER_PASSWORD: '${hdpm_password_base64}'" ${helm_fci_values_file}
+        fi
+
+        # Replace <hdp_host> with the hadoop ActiveNameNode under rmsConfig section
+        
+        # JUPYTER_URL: "https://<hdp_host>:5033/analytics/models/v1/jupyter/"
+        grep -qw "^    JUPYTER_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    JUPYTER_URL:/c\    JUPYTER_URL: \"https:\/\/${hdpm_vm_hostname}:5033\/analytics\/models\/v1\/jupyter\/\"" ${helm_fci_values_file}
+        fi
+        # JOB_URL: "https://<hdp_host>:5006/job"
+        grep -qw "^    JOB_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    JOB_URL:/c\    JOB_URL: \"https:\/\/${hdpm_vm_hostname}:5006\/job\"" ${helm_fci_values_file}
+        fi
+        # DISCOVERY_URL: "https://<hdp_host>:5004/discovery"
+        grep -qw "^    DISCOVERY_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    DISCOVERY_URL:/c\    DISCOVERY_URL: \"https:\/\/${hdpm_vm_hostname}:5004\/discovery\"" ${helm_fci_values_file}
+        fi
+        # NLU_URL: "https://<hdp_host>:5007/nlu"
+        grep -qw "^    NLU_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    NLU_URL:/c\    NLU_URL: \"https:\/\/${hdpm_vm_hostname}:5007\/nlu\"" ${helm_fci_values_file}
+        fi
+        # NLC_URL: "https://<hdp_host>:5001/nlc"
+        grep -qw "^    NLC_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    NLC_URL:/c\    NLC_URL: \"https:\/\/${hdpm_vm_hostname}:5001\/nlc\"" ${helm_fci_values_file}
+        fi
+        # LIVY_URL: "https://<hdp_host>:8998/batches"
+        grep -qw "^    LIVY_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    LIVY_URL:/c\    LIVY_URL: \"https:\/\/${hdpm_vm_hostname}:8998\/batches\"" ${helm_fci_values_file}
+        fi
+        # HDFS_URL: "hdfs://<hdp_host>/"
+        grep -qw "^    HDFS_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    HDFS_URL:/c\    HDFS_URL: \"hdfs:\/\/${hdpm_vm_hostname}\/\"" ${helm_fci_values_file}
+        fi
+        # CANCEL_PIPELINE_JOB_URL: "https://<hdp_host>:5013/cancel"
+        grep -qw "^    CANCEL_PIPELINE_JOB_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    CANCEL_PIPELINE_JOB_URL:/c\    CANCEL_PIPELINE_JOB_URL: \"https:\/\/${hdpm_vm_hostname}:5013\/cancel\"" ${helm_fci_values_file}
+        fi
+        # HDFS_ACCESS_URL: "hdfs://<hdp_host>:50070"
+        grep -qw "^    HDFS_ACCESS_URL:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "/^    HDFS_ACCESS_URL:/c\    HDFS_ACCESS_URL: \"hdfs:\/\/${hdpm_vm_hostname}:50070\"" ${helm_fci_values_file}
+        fi
+
+        # Check if there is any other occurence of <hdp_host> and replace with hdpm host name
+        grep -qw "<hdp_host>:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "s/<hdp_host>:/${hdpm_vm_hostname}:/g" ${helm_fci_values_file}
+        fi
+
+        grep -qw "<ZOOKEEPER_SERVER_1,ZOOKEEPER_SERVER_2,ZOOKEEPER_SERVER_N>" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "s/<ZOOKEEPER_SERVER_1,ZOOKEEPER_SERVER_2,ZOOKEEPER_SERVER_N>/${hdpm_vm_hostname},${hdpg_vm_hostname},${hdpsec_vm_hostname}/" ${helm_fci_values_file}
+        fi
+
+        grep -qw "OOZIE_SERVER:" ${helm_fci_values_file}
+        if [ $? -eq 0 ]; then
+            sed -i "s/OOZIE_SERVER: '<hostname>'/OOZIE_SERVER: '${hdpm_vm_hostname}'/" ${helm_fci_values_file}
+        fi
+    fi
+
+    # Change SSL Cert (very specific to cloud)
+    grep -qw "fci_jks_password: 'Q2wwdWROZXcyV0ZTU0NsMHVk'" ${helm_fci_values_file}
+    if [ $? -ne 0 ]; then
+        sed -i "/fci_jks_password:/c\    fci_jks_password: 'Q2wwdWROZXcyV0ZTU0NsMHVk'" ${helm_fci_values_file}
+    fi
+    #step 3.5 enable rms for SI. potential bug here: the following code will change the 3rd lines after "rms:" to "enabled: True"
+    if [ "{product_type}" == "si" ] || [ "{product_type}" == "fcisi" ]; then
+        sed -i '/rms:/!b;n;!b;n;!b;n;c\  enabled: True' ${helm_fci_values_file}
+    fi
+fi
+
+#step 4. on km, generate hosts file "install.hosts.properties"
+km_fci_hosts_prop_file="${fci_install_kit_dir}/helm/install.hosts.properties"
+km_hosts_prop_template_file="${fci_install_kit_dir}/helm/install.hosts.properties.template"
+if [ -f "$km_fci_hosts_prop_file" ]; then
+    if [ ! -s "$km_hosts_prop_template_file" ]; then
+        echo "Attention!!! km template hosts prop file $km_hosts_prop_template_file failed to be copied to the vm by terraform. Copying from the same location to the dest"
+        cp $cur_dir/install.hosts.properties.template $km_hosts_prop_template_file
+    else
+        cp $km_fci_hosts_prop_file "${km_fci_hosts_prop_file}.bak"
+        sed -i '/^[[:space:]]*$/d' $km_hosts_prop_template_file
+        cp $km_hosts_prop_template_file $km_fci_hosts_prop_file
+    fi
+else
+    echo "This is not km server, or $km_hosts_prop_file does NOT exist.  skipping hosts prop file generation"
+fi
+
+#step 5 make sure .acceptLicenseInformation.lock and .acceptLicenseAgreement.lock are created to ignore license accepting
+if [ ! -f "${fci_install_kit_dir}/helm/.acceptLicenseInformation.lock" ]; then
+    touch ${fci_install_kit_dir}/helm/.acceptLicenseInformation.lock
+fi
+if [ ! -f "${fci_install_kit_dir}/helm/.acceptLicenseAgreement.lock" ]; then
+    touch ${fci_install_kit_dir}/helm/.acceptLicenseAgreement.lock
+fi
+
+#step 6. to workaround if {hdpm_vm_sl_private_ip} exists in helm chart yaml file, since it will make helm chart install fail
+grep -qw "{hdpm_vm_sl_private_ip}" ${helm_fci_values_file}
+if [ $? -eq 0 ]; then
+    sed -i "/{hdpm_vm_sl_private_ip}/d" ${helm_fci_values_file}
+fi

@@ -1,0 +1,10 @@
+provisioner "file" {
+    source = "files/hostname_update.sh"
+    destination = "/opt/hostname_update.sh"
+}
+provisioner "remote-exec" {
+    inline = [
+      "chmod +x /opt/hostname_update.sh",
+      "/opt/hostname_update.sh"
+    ]
+}

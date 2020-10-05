@@ -1,0 +1,114 @@
+#!/bin/bash
+
+orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+selinux_config="/etc/selinux/config"
+
+if [[ "$orig_vm_type" == "ms"* || "$orig_vm_type" == "worker"* ]]; then
+    if [ ! -d "/ibm" ]; then
+        mkdir -p /ibm
+    fi
+
+    # Install the following packages
+    yum install -y libselinux-python tmux sshpass nfs-utils nfs-utils-lib rhel-system-roles ansible rpcbind net-tools bind-utils lvm2*
+
+    # Enable IP Forwarding on All Master and Worker Nodes
+    sysctl -w net.ipv4.ip_forward=1
+
+    sysctl_conf="/etc/sysctl.conf"
+
+    grep -q "net.ipv4.ip_forward =" ${sysctl_conf}
+    if [ $? -eq 0 ]; then
+        sed -i "/^net.ipv4.ip_forward =/c net.ipv4.ip_forward = 1" ${sysctl_conf}
+    else
+        echo net.ipv4.ip_forward = 1 >> ${sysctl_conf}
+    fi
+
+    sysctl -p
+
+    # Prevent Pinging the Loopback Address on All Master and Worker Nodes
+    etc_hosts="/etc/hosts"
+
+    
+    grep -qE "^127.0" ${etc_hosts}
+    if [ $? -eq 0 ]; then
+        sed -i '0,/127.0/s//#127.0/' ${etc_hosts}
+    fi
+    
+    grep -qE "^::1" ${etc_hosts}
+    if [ $? -eq 0 ]; then
+        sed -i '0,/::1/s//#::1/' ${etc_hosts}
+    fi
+
+    # Set SELINUX to 'permissive'
+    grep -qE "^SELINUX=" ${selinux_config}
+    if [ $? -eq 0 ]; then
+        sed -i "/^SELINUX=/c\SELINUX=permissive" ${selinux_config}
+    else
+        echo "SELINUX=permissive" >> ${selinux_config}
+    fi
+fi
+
+if [ "$orig_vm_type" == "haproxy" ]; then
+    yum install -y net-tools nmap haproxy
+
+    cp -f /opt/haproxy.cfg.template /etc/haproxy/haproxy.cfg
+
+    systemctl start haproxy 
+    systemctl enable haproxy
+
+    # Set SELINUX to 'permissive'
+    grep -qE "^SELINUX=" ${selinux_config}
+    if [ $? -eq 0 ]; then
+        sed -i "/^SELINUX=/c\SELINUX=permissive" ${selinux_config}
+    else
+        echo "SELINUX=permissive" >> ${selinux_config}
+    fi
+fi
+
+if [ "$orig_vm_type" == "nfs3" ]; then
+    nfs_export_options="{full_nfs_export_options}"
+    escaped_nfs_export_options="$(echo $nfs_export_options | sed -e 's/[]\/$*.^[]/\\&/g')"
+
+    exports_file="/etc/exports"
+    data_dir="/data"
+
+    # Install the following packages
+    yum install -y nfs-utils nfs-utils-lib
+
+    chkconfig nfs on
+    systemctl enable rpcbind
+    systemctl enable nfs
+    systemctl start rpcbind 
+    systemctl start nfs
+
+    if [ ! -d "${data_dir}" ]; then
+        mkdir -p ${data_dir}
+    fi
+
+    chown 1000:2000 ${data_dir}
+    chmod 777 ${data_dir}
+
+    grep -q "/data" ${exports_file}
+    if [ $? -ne 0 ]; then
+        echo "/data ${nfs_export_options}" >> ${exports_file}
+    else
+        sed -i "/^\/data/c \/data ${escaped_nfs_export_options}" ${exports_file}
+    fi  
+
+    # export NFS file systems
+    exportfs -a
+
+    # ensure there are no issues with the entries in /etc/fstab
+    mount -a
+
+    # restart the nfs server
+    systemctl restart nfs   
+
+    # Set SELINUX to 'permissive'
+    grep -qE "^SELINUX=" ${selinux_config}
+    if [ $? -eq 0 ]; then
+        sed -i "/^SELINUX=/c\SELINUX=permissive" ${selinux_config}
+    else
+        echo "SELINUX=permissive" >> ${selinux_config}
+    fi
+fi

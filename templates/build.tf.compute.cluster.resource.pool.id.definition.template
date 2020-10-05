@@ -1,0 +1,1 @@
+  resource_pool_id = "${data.vsphere_compute_cluster.cluster.resource_pool_id}"

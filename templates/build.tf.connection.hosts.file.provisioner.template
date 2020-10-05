@@ -1,0 +1,9 @@
+provisioner "file" {
+    source = "files/wfss.ibm.com.hosts.template"
+    destination = "/data/docker_vol/bind9/etc/zones/wfss.ibm.com.hosts.template"
+}
+
+provisioner "file" {
+    source = "files/db/"
+    destination = "/data/docker_vol/bind9/etc/zones/"
+}

@@ -1,0 +1,1 @@
+  host_system_id = "${data.vsphere_host.host.id}"

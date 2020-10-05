@@ -1,0 +1,135 @@
+#!/bin/bash
+
+#-------------- for hdp vms
+cur_dir=$(cd `dirname $0` && pwd)
+python_media_files="CC39TEN.tar"
+ambari_prerequisite_software_bundle="CC39VEN.tar"
+fci_hadoop_install_bin_tar_file="CC39UEN.tar"
+
+orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+if [ "$orig_vm_type" == "hdp"* ]; then
+    # check if enabled=0 in subscription-manager.conf 
+    subscription_manager_conf="/etc/yum/pluginconf.d/subscription-manager.conf"
+    sed -i "/^enabled=/c enabled=0" ${subscription_manager_conf}
+
+
+    yum repolist | grep -q '!epel'
+    if [ $? -ne 0 ]; then
+        yum install epel-release -y
+    fi
+
+    # uninstall libtirpc libtirpc-dev. remove this part, since the bug has been fixed in aug/sep release
+    #rpm -qa | grep libtirpc
+    #if [ $? -eq 0 ]; then
+    #    rpm -e --nodeps libtirpc libtirpc-dev
+    #fi
+fi
+
+#--------- Ambari stuff
+if [ "$orig_vm_type" == "hdpa" ]; then
+
+    km_vm_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-km/")
+    
+    # add Host key verification for kube master vm
+    hdpa_known_hosts="/root/.ssh/known_hosts"
+    grep -q "{km_vm_sl_private_ip}" $hdpa_known_hosts
+    if [ $? -ne 0 ]; then
+        ssh-keyscan -t ecdsa $km_vm_hostname,{km_vm_sl_private_ip} >> $hdpa_known_hosts
+    fi
+
+    if [ ! -d "/opt/ibm/fci/install/media/" ]; then
+        mkdir -p /opt/ibm/fci/install/media/
+    else
+        rm -rf /opt/ibm/fci/install/media/*
+    fi
+    
+    # Extract the the python tar file
+    tar -xvf /fcaimedia/${python_media_files} -C /opt/ibm/fci/install/media/
+
+    # Installing the per-requisite software bundle on the Ambari node
+    tar -C /opt/ibm/fci/install/media -xvf /fcaimedia/${ambari_prerequisite_software_bundle}
+
+    # Running the Downloaded Binary File.
+    tar -xvf /fcaimedia/${fci_hadoop_install_bin_tar_file} -C /fcaimedia
+    chmod u+x /fcaimedia/fci-hadoop.install.bin
+    /fcaimedia/fci-hadoop.install.bin
+
+    #
+    # Copy keystsore files and certs
+    if [ -d "/opt/fci_keystore" ]; then
+        #copy the transferred fci secrets to the correct helm folder
+        cp /opt/fci_keystore/fci_universal_ks.jks /opt/ibm/fci/lib/.
+        cp /opt/fci_keystore/fci_universal_ks.crt.pem /etc/pki/tls/certs/.
+    else
+        echo "fci keystore secrets failed to be transferred to hdpa vm by terraform, need to use scp instead"
+        `sshpass -p '{km_vm_password}' scp {vm_user}@{km_vm_sl_private_ip}:/root/fci-install-kit/helm/secrets/fci_universal_ks.jks /opt/ibm/fci/lib/.`
+        `sshpass -p '{km_vm_password}' scp {vm_user}@{km_vm_sl_private_ip}:/root/fci-install-kit/helm/secrets/fci_universal_ks.crt.pem /etc/pki/tls/certs/.`
+    fi
+
+    # copy fcii-hadoop.install.bin file from KM if offering type in insurance (fcii)
+    if [ "{vsphere_vm_hostname}" == "fcii"* ]; then
+        `sshpass -p '{km_vm_password}' scp {vm_user}@{km_vm_sl_private_ip}:/root/fcii-install-kit/Insurance_Analytics/distributions/fcii-hadoop.install.bin /media/.`
+    fi
+
+    /usr/bin/cp -r /opt/ibm/fci/install/fci-hadoop.properties /opt/ibm/fci/install/fci-hadoop.properties-original
+    /usr/bin/cp -r /opt/ibm/fci/install/fci-hadoop.prod.hosts.properties /opt/ibm/fci/install/fci-hadoop.prod.hosts.properties-original
+    #add this code block to make sure if terraform deploy failed, can still copy the properties file by  running the copy
+    if [ -s $cur_dir/fci-hadoop.prod.hosts.properties ]; then
+        cp $cur_dir/fci-hadoop.prod.hosts.properties /opt/ibm/fci/install/fci-hadoop.prod.hosts.properties
+    fi
+
+    fci_hadoop_properties="/opt/ibm/fci/install/fci-hadoop.properties"
+
+    sed -i "/^fci.environment.type/c fci.environment.type     = prod" ${fci_hadoop_properties}
+    sed -i "/^fci.kubernetes.master/c fci.kubernetes.master     = ${km_vm_hostname}" ${fci_hadoop_properties}
+    
+    #enable kerberos only for SI. For other products like AI, insurance, etc, kerberos should NOT be enabled
+    if [ "{product_type}" == "fcisi" ] || [ "{product_type}" == "si" ]; then
+        grep -q "^enable_kerberos=" ${fci_hadoop_properties}
+        if [ $? -eq 0 ]; then
+            sed -i "/^enable_kerberos=/c enable_kerberos=true" ${fci_hadoop_properties}
+        else
+            echo "enable_kerberos=true" >> ${fci_hadoop_properties}
+        fi
+    fi
+    
+    km_fci_values_file="/opt/km-fci-values.yaml"
+    # copy fci-values.yaml from KM vm
+    `sshpass -p '{km_vm_password}' scp {vm_user}@{km_vm_sl_private_ip}:/root/fci-install-kit/helm/fci-values.yaml $km_fci_values_file`
+
+    km_jwt_key=`grep "jwt_key: " $km_fci_values_file | grep -v "#" | awk -F ":" '{print $2}' | awk '{print $1}'`
+
+    km_fci_jks_password=`grep "fci_jks_password: " $km_fci_values_file | grep -v "#" | awk -F "'" '{print $2}' | awk '{print $1}'`
+
+    sed -i "/^JWT_KEY/c JWT_KEY                   = ${km_jwt_key}" ${fci_hadoop_properties}
+
+    grep -q "ssl.client.keystore.password=" ${fci_hadoop_properties}
+    if [ $? -eq 0 ]; then
+        sed -i "/^ssl.client.keystore.password=/c ssl.client.keystore.password=${km_fci_jks_password}" ${fci_hadoop_properties}
+    fi
+    grep -q "ssl.client.truststore.password=" ${fci_hadoop_properties}
+    if [ $? -eq 0 ]; then
+        sed -i "/^ssl.client.truststore.password=/c ssl.client.truststore.password=${km_fci_jks_password}" ${fci_hadoop_properties}
+    fi
+    grep -q "ssl.server.keystore.password=" ${fci_hadoop_properties}
+    if [ $? -eq 0 ]; then
+        sed -i "/^ssl.server.keystore.password=/c ssl.server.keystore.password=${km_fci_jks_password}" ${fci_hadoop_properties}
+    fi
+    grep -q "ssl.server.truststore.password=" ${fci_hadoop_properties}
+    if [ $? -eq 0 ]; then
+        sed -i "/^ssl.server.truststore.password=/c ssl.server.truststore.password=${km_fci_jks_password}" ${fci_hadoop_properties}
+    fi
+    
+    #ignore license accept
+    if [[ ! -f /opt/ibm/fci/install/.locks.FCI/.license.lock ]]; then
+        mkdir -p "/opt/ibm/fci/install/.locks.FCI"
+cat <<-EOF >>  /opt/ibm/fci/install/.locks.FCI/.license.lock
+License L-PFOR-BF4GUA acceptance date:
+EOF
+    fi
+    if [[ ! -f /opt/ibm/fci/install/.license.lock ]]; then
+cat <<-EOF >>  /opt/ibm/fci/install/.locks.FCI/.license.lock
+License L-PFOR-BF4GUA acceptance date:
+EOF
+    fi
+fi

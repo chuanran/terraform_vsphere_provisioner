@@ -1,0 +1,10 @@
+provisioner "file" {
+    source = "files/"
+    destination = "/opt"
+}
+provisioner "remote-exec" {
+    inline = [
+      "chmod +x /opt/*.sh",
+      "/opt/customization.sh"
+    ]
+}

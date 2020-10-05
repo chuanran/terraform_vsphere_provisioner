@@ -1,0 +1,4 @@
+data "vsphere_compute_cluster" "cluster" {
+  name          = "${var.vsphere_compute_cluster}"
+  datacenter_id = "${data.vsphere_datacenter.target_dc.id}"
+}

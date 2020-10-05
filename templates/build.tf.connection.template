@@ -1,0 +1,14 @@
+connection {
+    type = "ssh"
+    host="${var.vm_sl_private_ip}"
+    user = "${var.vmuser}"
+    password = "${var.vmpassword}"
+}
+
+#hosts_file_provisioner
+
+#km_hosts_prop_file_provisioner
+
+#hdpa_hosts_prop_file_provisioner
+
+#customization_provisioner

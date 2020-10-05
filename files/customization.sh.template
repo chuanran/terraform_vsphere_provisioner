@@ -1,0 +1,457 @@
+#!/bin/bash
+#This script is used to do post-provision customization by TFD after the vm is provisioned by terraform. Customization mainly includes:
+#1. base OS configurations such as: hostname updates, chrony config, etc
+#2. zabbix monitor agents configuration
+#3. generation of bind9 DNS entries in mgmt server
+#4. customization on helm/properties files for kubernetes platform and the corresponding product (dd, fcii, fcisi, etc)
+
+#properties definition
+cur_dir=$(cd `dirname $0` && pwd)
+zabbix_config="/etc/zabbix/zabbix_agentd.conf"
+chrony_conf="/etc/chrony.conf"
+mgmt_sqlib_db2_config="/home/dsrdbm01/sqllib/db2nodes.cfg"
+default_nginx_conf="/root/sl-nginx/fci-exports/conf/conf.d/default.conf"
+ssl_nginx_conf="/root/sl-nginx/fci-exports/conf/conf.d/ssl.conf"
+exports_file="/etc/exports"
+
+#step 0. change hostname and /etc/hosts file
+# change hostname if hostname contains "."
+echo "{vsphere_vm_hostname}" | grep -q "\."
+if [ $? -eq 0 ]; then
+    cp /etc/hostname /etc/hostname.bak
+    echo "{vsphere_vm_hostname}" > /etc/hostname
+    systemctl restart systemd-hostnamed
+fi
+# update /etc/hosts file to ensure 10.* ip entry is not there
+grep -qwE '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' /etc/hosts
+if [ $? -eq 0 ]; then
+    sed -i.bak -r '/10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/d' /etc/hosts
+fi
+
+# Add History with Timestamp
+grep -q "HISTTIMEFORMAT=\"%d/%m/%y %T\"" /root/.bashrc
+if [ $? -ne 0 ]; then
+    echo "HISTTIMEFORMAT=\"%d/%m/%y %T\" " >> /root/.bashrc
+fi
+
+#step 1. enable zabbix-agent service by default, and update zabbix agent conf file
+#1.1 make sure hostname points to the vm inventory name
+#1.2 make sure zabbix server is <zabbix_server_ip_to_be_replaced>
+if [ -s "$zabbix_config" ]; then
+    #enable zabbix-agent service by default
+    systemctl enable zabbix-agent
+    #update zabbix agent conf file
+    grep -Eq "^Hostname=" $zabbix_config
+    if [ $? -eq 0 ]; then
+        grep -Eq "^Hostname={vsphere_target_vm_name}" $zabbix_config
+        if [ $? -ne 0 ]; then
+            sed -i.bak "/^Hostname=/c Hostname={vsphere_target_vm_name}" $zabbix_config
+            service zabbix-agent restart
+        fi
+    else
+        cp $zabbix_config ${zabbix_config}.bak
+        echo "Hostname={vsphere_target_vm_name}" >> $zabbix_config
+        service zabbix-agent restart
+    fi
+    grep -Eq "^Server=" $zabbix_config
+    if [ $? -eq 0 ]; then
+        grep -Eq "^Server=<zabbix_server_ip_to_be_replaced>" $zabbix_config
+        if [ $? -ne 0 ]; then
+            sed -i.bak "/^Server=/c Server=<zabbix_server_ip_to_be_replaced>" $zabbix_config
+            service zabbix-agent restart
+        fi
+    else
+        cp $zabbix_config ${zabbix_config}.bak
+        echo "Server=<zabbix_server_ip_to_be_replaced>" >> $zabbix_config
+        service zabbix-agent restart
+    fi
+    grep -Eq "^ServerActive=" $zabbix_config
+    if [ $? -eq 0 ]; then
+        grep -Eq "^ServerActive=<zabbix_server_ip_to_be_replaced>" $zabbix_config
+        if [ $? -ne 0 ]; then
+            sed -i.bak "/^ServerActive=/c ServerActive=<zabbix_server_ip_to_be_replaced>" $zabbix_config
+            service zabbix-agent restart
+        fi
+    else
+        cp $zabbix_config ${zabbix_config}.bak
+        echo "ServerActive=<zabbix_server_ip_to_be_replaced>" >> $zabbix_config
+        service zabbix-agent restart
+    fi
+else
+    echo "No zabbix configuration file detected"
+fi
+
+#step 2. generate bind9 zone hosts file, including:
+#2.1 wfss.ibm.com.hosts, which is the forward DNS entries
+#2.2 db.* files, which are the reverse DNS entries
+hosts_file_dir="/data/docker_vol/bind9/etc/zones"
+hosts_file="/data/docker_vol/bind9/etc/zones/wfss.ibm.com.hosts"
+hosts_template_file="/data/docker_vol/bind9/etc/zones/wfss.ibm.com.hosts.template"
+named_conf_file="/data/docker_vol/bind9/etc/named.conf.local"
+if [ -s "$hosts_file" ]; then
+    if [ ! -s "$hosts_template_file" ]; then
+        echo "Attention!!!template hosts file $hosts_template_file failed to be copied to the vm by terraform. Copying from the same location to the dest"
+        cp ${cur_dir}/wfss.ibm.com.hosts.template $hosts_template_file
+    fi
+    #copy original hosts file to the new hosts file, including: lr2-devops-vvm-wash4.wfss.ibm.com, rhelreposrv.wfss.ibm.com, rhelreposrv.fss.ibm.com
+    grep -Ewq "^lr2-devops-vvm-wash4\.wfss\.ibm\.com\." $hosts_file
+    if [ $? -eq 0 ]; then
+        grep -Ew "^lr2-devops-vvm-wash4\.wfss\.ibm\.com\." $hosts_file >> $hosts_template_file
+    fi
+    grep -Ewq "^rhelreposrv\.wfss\.ibm\.com\." $hosts_file
+    if [ $? -eq 0 ]; then
+        grep -Ew "^rhelreposrv\.wfss\.ibm\.com\." $hosts_file >> $hosts_template_file
+    fi
+    grep -Ewq "^rhelreposrv\.fss\.ibm\.com\." $hosts_file
+    if [ $? -eq 0 ]; then
+        grep -Ew "^rhelreposrv\.fss\.ibm\.com\." $hosts_file >> $hosts_template_file
+    fi
+    
+    #copy mgmt related CNAME entries to new hosts file
+    grep -E "+.*IN+.*CNAME+.*mgmt+.*" $hosts_file | grep -qv " *.*;"
+    if [ $? -eq 0 ]; then
+        cat $hosts_file | grep -E "+.*IN+.*CNAME+.*mgmt+.*" | grep -v " *.*;"  >> $hosts_template_file
+        old_mgmt_hostname=`cat $hosts_file | grep -E "+.*IN+.*CNAME+.*mgmt+.*" |  grep -v " *.*;" |  head -n 1 |  awk '{print $4}' | awk '{print $1}'`
+        sed -i "s/$old_mgmt_hostname/{vsphere_vm_hostname}\./g" $hosts_template_file
+    fi
+    cp $hosts_file "${hosts_file}.bak"
+    cp $hosts_template_file $hosts_file
+
+    # check for db reverse file and append to named.conf.local
+    for generated_db_file in `ls ${hosts_file_dir}/db.*`; do
+        chmod 755 ${generated_db_file}
+        chown 25:25 ${generated_db_file}
+        
+        baseaddress="$(echo $generated_db_file | cut -d. -f2-4)"
+        reverse_baseaddress=`echo ${baseaddress} | awk -F. '{print $3"." $2"."$1}'`
+        grep -q "/etc/named/zones/db.${baseaddress}" ${named_conf_file}
+        if [ $? -eq 1 ]; then
+            echo "" >> ${named_conf_file}
+            echo "zone \"${reverse_baseaddress}.in-addr.arpa\" {" >> ${named_conf_file}
+            echo "    type master;" >> ${named_conf_file}
+            echo "    file \"/etc/named/zones/db.${baseaddress}\";" >> ${named_conf_file}
+            echo "    };" >> ${named_conf_file}
+        fi
+    done
+    
+    /data/docker_bind_update.sh
+else
+    echo "This is not mgmt server, skipping hosts file modification"
+fi
+
+#step 3. chrony configuration:  
+#3.1 for mgmt server, in "/etc/chrony.conf", it will use "servertime.service.softlayer.com", and need to use "allow 10.0.0.0/8" to make other chrony clients can connect to it
+#3.2 for other vms, in "/etc/chrony.conf", it will use mgmt server as time server
+if [ -s "$chrony_conf" ]; then
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    mgmt_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-mgmt/")
+    cat /etc/hostname |  grep -qw "${mgmt_hostname}"
+    #for mgmt server, will use "servertime.service.softlayer.com" in chrony conf, and  need to use "allow 10.0.0.0/8"
+    if [ $? -eq 0 ]; then
+        #use "servertime.service.softlayer.com" in chrony conf
+        grep -Eq "^server" $chrony_conf
+        if [ $? -eq 0 ]; then
+            grep -Eq "^server servertime.service.softlayer.com" $chrony_conf
+            if [ $? -ne 0 ]; then
+                sed -i.bak "/^server/c server servertime.service.softlayer.com" $chrony_conf
+            fi
+        else
+            cp $chrony_conf ${chrony_conf}.bak
+            echo "server servertime.service.softlayer.com" >> $chrony_conf
+        fi
+        #use "allow 10.0.0.0/8"
+        grep -Eq "^allow" $chrony_conf
+        if [ $? -eq 0 ]; then
+            grep -Eq "^allow 10.0.0.0/8" $chrony_conf
+            if [ $? -ne 0 ]; then
+                sed -i.bak "/^allow/c allow 10.0.0.0/8" $chrony_conf
+            fi
+        else
+            cp $chrony_conf ${chrony_conf}.bak
+            echo "allow 10.0.0.0/8" >>$chrony_conf
+        fi
+    #for other vms other than mgmt, will use     
+    else
+        #use mgmt server as the time server in chrony conf
+        grep -Eq "^server" $chrony_conf
+        if [ $? -eq 0 ]; then
+            grep -Eq "^server ${mgmt_hostname}" $chrony_conf
+            if [ $? -ne 0 ]; then
+                sed -i.bak "/^server/c server ${mgmt_hostname}" $chrony_conf
+            fi
+        else
+            cp $chrony_conf ${chrony_conf}.bak
+            echo "server ${mgmt_hostname}" >> $chrony_conf
+        fi
+    fi
+    systemctl restart chronyd
+else
+    echo "No chrony configuration file ($chrony_conf) found"
+fi
+
+#step 4. on mgmt server, change mgmt hostname to the correct one in /home/dsrdbm01/sqllib/db2nodes.cfg file
+if [ -s "$mgmt_sqlib_db2_config" ]; then
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    mgmt_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-mgmt/")
+    old_mgmt_hostname=$(cat $mgmt_sqlib_db2_config | awk '{print $2}')
+    sed -i "s/$old_mgmt_hostname/$mgmt_hostname/g" $mgmt_sqlib_db2_config
+fi
+
+#step.5 on web server, in default.conf and ssl.conf, need to change proxy_pass to use the correct kube master's hostname
+if [ -s "$default_nginx_conf" ]; then
+    old_km_hostname=$(grep "proxy_pass" $default_nginx_conf |  grep -v "#" |  grep "km" | head -n 1 |  awk -F "//" '{print $2}' |  awk -F ":" '{print $1}')
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    new_km_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-km/")
+    sed -i "s/${old_km_hostname}/${new_km_hostname}/g" $default_nginx_conf
+fi
+if [ -s "$ssl_nginx_conf" ]; then
+    old_km_hostname=$(grep "proxy_pass" $ssl_nginx_conf |  grep -v "#" |  grep "km" | head -n 1 |  awk -F "//" '{print $2}' |  awk -F ":" '{print $1}')
+    orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+    new_km_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-km/")
+    sed -i "s/${old_km_hostname}/${new_km_hostname}/g" $ssl_nginx_conf
+fi
+
+nfs_export_options="{full_nfs_export_options}"
+escaped_nfs_export_options="$(echo $nfs_export_options | sed -e 's/[]\/$*.^[]/\\&/g')"
+
+#step 6. on nfs1 server, needs to create the mount points for different types of product
+echo "{vsphere_vm_hostname}" | grep -q "nfs1"
+if [ $? -eq 0 ]; then
+    # Configure NFS 
+    if [ -d "/fcicore" ]; then
+        rm -rf /fcicore/*
+    fi
+    if [ -d "/fciai" ]; then
+        rm -rf /fciai/*
+    fi
+    if [ -d "/fcisi" ]; then
+        rm -rf /fcisi/*
+    fi
+
+    sed -i '/^\/fcicore/d' $exports_file
+    sed -i '/^\/fciai/d' $exports_file
+    sed -i '/^\/fcisi/d' $exports_file
+
+    declare -a mount_dirs_array=("fci-solution" "fci-messaging" "fci-cedm-integration-data" \
+                                "common-scripts" "es-data" \
+                                "fci-rms-data-store-data" \
+                                "fci-kafka-data-1" "fci-kafka-data-2" "fci-kafka-data-3" "fci-zk-data-1" "fci-zk-data-2" "fci-zk-data-3" \
+                                "search-es-data" "fci-mongodb-primary-data" "fci-mongodb-secondary-data-1" \
+                                "fci-zk-log-1" "fci-zk-log-2" "fci-zk-log-3" "fci-rms-voice-data" "fci-rms-liberty-streams-data" \
+                                "fci-rms-liberty-modules-data" "fci-rms-liberty-hdfs-data" "fci-graph" \
+                                "fci-prometheus-server-data" "fci-alertmanager-data" "fci-grafana-data" \
+                                "fci-elastalert-data" "fci-rms-liberty-data" \
+                                "fci-datastore-server-database-1" "fci-datastore-server-database-2" \
+                                "fci-datastore-server-instance-1" "fci-datastore-server-instance-2" \
+                                "fci-iui-bk" "fci-cognos" "fci-iui-nginx" \
+                                "fci-wca" "fci-datastore-server-scripts-1" "fci-datastore-server-scripts-2" "fci-graph-writer-liberty")
+    # Add each dir in mount_dirs_array
+    for mount_directory in "${mount_dirs_array[@]}"; do
+        mkdir -p /fcicore/$mount_directory
+    done
+
+    chmod 777 /fcicore/*
+    chown root:root /fcicore/*
+
+    for mount_directory in "${mount_dirs_array[@]}"; do
+        grep -q "/fcicore/${mount_directory}" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcicore/${mount_directory} ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcicore\/${mount_directory}/c \/fcicore\/${mount_directory} ${escaped_nfs_export_options}" $exports_file
+        fi
+    done
+    # Configure NFS 
+
+    if [ "{product_type}" == "fcisi" ] || [ "{product_type}" == "si" ]; then
+        mkdir -p "/fcisi/sifs-logstash-instance"
+        mkdir -p "/fcisi/sifs-solr-instance"
+        mkdir -p "/fcisi/sifs-filebeat-instance"
+        mkdir -p "/fcisi/sifs-liberty-instance"
+
+        chmod 777 /fcisi/*
+        chown root:root /fcisi/*
+
+        grep -q "/fcisi/sifs-logstash-instance" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcisi/sifs-logstash-instance ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcisi\/sifs-logstash-instance/c \/fcisi\/sifs-logstash-instance ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcisi/sifs-solr-instance" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcisi/sifs-solr-instance ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcisi\/sifs-solr-instance/c \/fcisi\/sifs-solr-instance ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcisi/sifs-filebeat-instance" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcisi/sifs-filebeat-instance ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcisi\/sifs-filebeat-instance/c \/fcisi\/sifs-filebeat-instance ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcisi/sifs-liberty-instance" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcisi/sifs-liberty-instance ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcisi\/sifs-liberty-instance/c \/fcisi\/sifs-liberty-instance ${escaped_nfs_export_options}" $exports_file
+        fi
+    fi
+    if [ "{product_type}" == "ai" ]; then
+        mkdir -p /fciai/fcai-tls
+        chmod 777 /fciai/*
+        chown root:root /fciai/*
+
+        grep -q "/fciai/fcai-tls" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fciai/fcai-tls ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fciai\/fcai-tls/c \/fciai\/fcai-tls ${escaped_nfs_export_options}" $exports_file
+        fi        
+    fi
+
+    # export NFS file systems
+    exportfs -a
+
+    # ensure there are no issues with the entries in /etc/fstab
+    mount -a
+
+    # restart the nfs server
+    systemctl restart nfs
+fi
+
+#step 7. on nfs2 server, needs to create the mount points for due diligence
+echo "{vsphere_vm_hostname}" | grep -q "nfs2"
+if [ $? -eq 0 ]; then
+    if [ "{product_type}" == "dd" ]; then
+        grep -q "/fcidd/fcdd-ml" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcidd/fcdd-ml ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcidd\/fcdd-ml/c \/fcidd\/fcdd-ml ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcidd/fcdd-wex" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcidd/fcdd-wex ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcidd\/fcdd-wex/c \/fcidd\/fcdd-wex ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcidd/fcdd-node-instance" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcidd/fcdd-node-instance ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcidd\/fcdd-node-instance/c \/fcidd\/fcdd-node-instance ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcidd/fcdd-mongo-data" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcidd/fcdd-mongo-data ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcidd\/fcdd-mongo-data/c \/fcidd\/fcdd-mongo-data ${escaped_nfs_export_options}" $exports_file
+        fi
+        grep -q "/fcidd/fcdd-liberty-instance" $exports_file
+        if [ $? -ne 0 ]; then
+            echo "/fcidd/fcdd-liberty-instance ${nfs_export_options}" >> $exports_file
+        else
+            sed -i "/^\/fcidd\/fcdd-liberty-instance/c \/fcidd\/fcdd-liberty-instance ${escaped_nfs_export_options}" $exports_file
+        fi
+    fi
+fi
+
+orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+
+#step 8. For all types of products, need to do customization on helm config and properties file for kubernetes platform
+if [ "${orig_vm_type}" == "km" ]; then
+    chmod +x ${cur_dir}/*
+    ${cur_dir}/customization.kube.platform.sh
+fi
+#step 9. For Due Diligence, do the corresponding customization on helm config and properties file
+if [ "{product_type}" == "dd" ]; then
+    ${cur_dir}/customization.dd.sh
+fi
+
+#step 10. for fci insurance, need to do customization for hadoop cluster installation, and update helm and properties files for insurance
+if [ "{product_type}" == "fcii" ]; then
+    ${cur_dir}/customization.hdp.sh
+    ${cur_dir}/customization.insurance.sh
+fi
+
+#step 11. for fci Surveillance insights, need to do customization for hadoop cluster installation,and update helm and properties files for SI
+if [ "{product_type}" == "fcisi" ] || [ "{product_type}" == "si" ]; then
+    ${cur_dir}/customization.hdp.sh
+    ${cur_dir}/customization.si.sh
+fi
+
+#step 12. For Alerts Insight, do the corresponding customization for hadoop cluster installation
+if [ "{product_type}" == "ai" ]; then
+    ${cur_dir}/customization.hdp.sh
+    ${cur_dir}/customization.ai.sh
+fi
+
+#step 13. For WSL, do the corresponding customization for WSL VMs
+${cur_dir}/customization.wsl.sh
+
+#step 14. startup scripts calling for all roles of vms, including: mgmt server, db, wca clusters, etc
+mgmt_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-mgmt/")
+cat /etc/hostname |  grep -qw "${mgmt_hostname}"
+if [ $? -eq 0 ]; then
+    /data/ldap_server.sh start
+    if [ $? -ne 0 ]; then
+        echo "ldap server failed to be started"
+    fi
+    /data/docker_bind.sh
+    if [ $? -ne 0 ]; then
+        echo "docker bind failed to be started"
+    fi
+    /data/was_server.sh start
+    if [ $? -ne 0 ]; then
+        echo "was server failed to be started"
+    fi
+fi
+
+db_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-db/")
+cat /etc/hostname |  grep -qw "${db_hostname}"
+if [ $? -eq 0 ]; then
+    su - db2inst1 -c "db2start; exit $?"
+    if [ $? -ne 0 ]; then
+        echo "db2 startup failed"
+    fi
+    su - db2inst1 -c "db2 activate db cogkycdb; exit $?"
+    if [ $? -ne 0 ]; then
+        echo "cogkycdb activation failed"
+    fi
+fi
+wexc_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-wexc/")
+cat /etc/hostname |  grep -qw "${wexc_hostname}"
+if [ $? -eq 0 ]; then
+    su - esadmin -c "startccl.sh; exit $?"
+    if [ $? -ne 0 ]; then
+        echo "startccl failed for wexc"
+    fi
+fi
+wexfp_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-wexfp/")
+cat /etc/hostname |  grep -qw "${wexfp_hostname}"
+if [ $? -eq 0 ]; then
+    su - esadmin -c "startccl.sh; exit $?"
+    if [ $? -ne 0 ]; then
+        echo "startccl failed for wexfp"
+    fi
+fi
+wexm_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-wexm/")
+cat /etc/hostname |  grep -qw "${wexm_hostname}"
+if [ $? -eq 0 ]; then
+    su - esadmin -c "startccl.sh; esadmin system startall; exit $?"
+    if [ $? -ne 0 ]; then
+        echo "startccl failed for wexm"
+    fi
+fi
+web_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-web/")
+cat /etc/hostname |  grep -qw "${web_hostname}"
+if [ $? -eq 0 ]; then
+    cd /root/sl-nginx
+    ./stop-nginx-volume.sh
+    sleep 1
+    ./start-nginx-volume.sh
+    if [ $? -ne 0 ]; then
+        echo "web server failed to be started"
+    fi
+fi

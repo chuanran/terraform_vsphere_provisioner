@@ -1,0 +1,4 @@
+provisioner "file" {
+    source = "files/install.hosts.properties.template"
+    destination = "/root/fci-install-kit/helm/install.hosts.properties.template"
+}

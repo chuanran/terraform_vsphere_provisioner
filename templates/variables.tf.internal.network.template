@@ -1,0 +1,3 @@
+variable "vsphere_kube_internal_network_name" {}
+variable "vm_kube_internal_ip" {}
+variable "vm_kube_internal_netmask" {}

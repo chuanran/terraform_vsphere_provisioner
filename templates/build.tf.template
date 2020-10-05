@@ -1,0 +1,102 @@
+provider "vsphere" {
+  user           = "${var.vsphere_user}"
+  password       = "${var.vsphere_password}"
+  vsphere_server = "${var.vsphere_vcenter}"
+
+  # If you have a self-signed cert
+  allow_unverified_ssl = true
+}
+
+data "vsphere_datacenter" "target_dc" {
+  name = "${var.vsphere_target_datacenter}"
+}
+
+data "vsphere_datacenter" "source_dc" {
+  name = "${var.vsphere_source_datacenter}"
+}
+
+data "vsphere_datastore" "datastore" {
+  name          = "${var.vsphere_target_datastore}"  
+  datacenter_id = "${data.vsphere_datacenter.target_dc.id}"
+}
+
+data "vsphere_tag_category" "category" {
+  name = "ansible"
+}
+
+#vsphere_compute_cluster_data_definition
+
+#vsphere_host_data_definition
+
+#vsphere_resource_pool_data_definition
+
+data "vsphere_network" "network" {
+  name          = "${var.vsphere_sl_private_network_name}"
+  datacenter_id = "${data.vsphere_datacenter.target_dc.id}"
+}
+
+#kube_internal_network_data
+
+data "vsphere_virtual_machine" "template" {
+  name          = "${var.vsphere_source_vm_folder}/${var.vsphere_vm_template}"
+  datacenter_id = "${data.vsphere_datacenter.source_dc.id}"
+}
+
+#tag_vm_resource_data_section
+
+data "vsphere_tag" "allhosts_tag" {
+  name        = "${var.allhosts_vm_tag_name}"
+  category_id = "${data.vsphere_tag_category.category.id}"
+}
+
+resource "vsphere_virtual_machine" "vm" {
+  count            = "${var.vsphere_vm_count}"
+  name             = "${var.vsphere_target_vm_name}"
+  num_cpus = "${var.vm_cpu}"
+  memory   = "${var.vm_memory}"
+  cpu_hot_add_enabled = true
+  memory_hot_add_enabled = true
+  #resource_pool_id_definition
+  #host_system_id_definition
+  datastore_id     = "${data.vsphere_datastore.datastore.id}"
+  folder ="${var.vsphere_target_vm_folder}"
+  guest_id = "${data.vsphere_virtual_machine.template.guest_id}"
+  wait_for_guest_net_timeout = "45"
+  wait_for_guest_net_routable = "true"
+  #vm_tags_list_section
+
+  network_interface {
+    network_id = "${data.vsphere_network.network.id}"
+  }
+
+  #kube_internal_network_definition
+  
+  #disks_definition
+
+  clone {
+    template_uuid = "${data.vsphere_virtual_machine.template.id}"
+    timeout = 120
+    customize {
+      linux_options {
+        host_name = "${var.vsphere_vm_hostname}"
+        domain    = "${var.vsphere_dns_domain}"
+      }
+      timeout = 60
+      network_interface {
+        ipv4_address = "${var.vm_sl_private_ip}"
+        ipv4_netmask = "${var.vm_sl_private_netmask}"
+      }
+      #kube_internal_network_customization
+
+      ipv4_gateway = "${var.vm_network_gateway}"
+      dns_suffix_list = "${var.virtual_machine_search_domain}"
+      dns_server_list = "${var.vsphere_dns_servers}"
+  }
+}
+
+## connection definition for remote script executing
+#connection_definition
+
+}
+
+#compute_cluster_vm_host_rule_resource_definition

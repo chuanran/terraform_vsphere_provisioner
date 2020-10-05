@@ -1,0 +1,24 @@
+vsphere_vm_template = "{vm_template_name}"
+vsphere_vm_count = "{vm_count}"
+
+#prefix of sl private ip, for example, if the ip is 10.120.120.10, the prefix should be "10.120.120.", it must ends with "." 
+vm_sl_private_ip = "{sl_private_ip_prefix}"
+#the start number for an ip range. for example, if you want to provision 2 vms with consecutive ips 10.120.120.10 and 10.120.120.11, the start number should be "10"
+vm_sl_private_ip_start_number = "{sl_private_ip_start_number}"
+
+#kubernetes IP section: If kubernetes internal network needed, you need to fill values for following variables
+#prefix of kubernetes internal ip, for example, if the ip is 192.168.100.2, the prefix should be "192.168.100.", it must ends with "."
+#vm_kube_internal_ip = "{kube_internal_ip_prefix}"
+#the start number for an ip range. for example, if you want to provision 2 vms with consecutive ips 192.168.100.5 and 192.168.100.6, the start number should be "5"
+#vm_kube_internal_ip_start_number = "{kube_internal_ip_start_number}"
+#the network name of kubernetes internal network, you can get it from vcsa.
+#vsphere_kube_internal_network_name = "{kube_internal_network_name}"
+#kubernetes internal netmask number, like 24, 26, etc
+#vm_kube_internal_netmask = "{kube_internal_netmask}"
+
+#the target vm's name 
+vsphere_target_vm_name = "{target_vm_name}"
+
+#if you want to establish a ssh connection after vm is provisioned, you need assign vm_ssh_user and vm_ssh_password here
+#vmuser="{ssh_user}"
+#vmpassword="{ssh_password}"

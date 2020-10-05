@@ -1,0 +1,4 @@
+data "vsphere_tag" "hostname_tag" {
+  name        = "${var.vsphere_vm_hostname}"
+  category_id = "${data.vsphere_tag_category.category.id}"
+}

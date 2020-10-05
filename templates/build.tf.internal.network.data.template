@@ -1,0 +1,4 @@
+data "vsphere_network" "network_kube" {
+  name          = "${var.vsphere_kube_internal_network_name}"
+  datacenter_id = "${data.vsphere_datacenter.target_dc.id}"
+}

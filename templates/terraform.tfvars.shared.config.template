@@ -1,0 +1,36 @@
+#common parameters shared by all roles (kube_master, kube_worker, web, wexc, etc)
+vsphere_vcenter = "{vcenter_ip}"
+vsphere_user = "{vcenter_login_user}"
+vsphere_password = "{vcenter_login_password}"
+vsphere_source_datacenter = "{vcenter_source_datacenter_name}"
+vsphere_source_vm_folder = "{source_host_server_folder}"
+vsphere_target_datacenter = "{vcenter_target_datacenter_name}"
+vsphere_target_datastore = "{datastore_name}"
+
+#There are 3 scenarios on how to choose following parameters (where you can get the values from vcsa): 
+#scenario 1: if you want to clone/provision a vm to a specfic host in a compute cluster, You need to use parameter "vsphere_compute_cluster" and "vsphere_host" and uncomment them with correct value filled, 
+# and keep "vsphere_host_folder" commented 
+#scenario 2: if you want to clone/provision a vm to any random host in a compute cluster, You only need to use parameter "vsphere_compute_cluster" and uncomment them with correct value filled, 
+# and keep "vsphere_host" and vsphere_host_folder" commented 
+#scenario 3: if you want to clone/provision a vm to a target single host not within any compute cluser,  You need to use parameter "vsphere_host" and "vsphere_host_folder", 
+# and uncomment them with correct value filled, and keep "vsphere_compute_cluster" commented
+
+#vsphere_compute_cluster = "{compute_cluster_name}"
+#vsphere_host = "{host_server_hostname_or_ip}"
+#host server's folder path, like "bcr02a/1143/1143(FCDD-Backend)Cluster/"
+#vsphere_host_folder = "{host_server_folder}"
+
+#the target folder to host the target vm(s)
+vsphere_target_vm_folder="{target_vm_folder}"
+
+#softlayer private network definition
+vsphere_sl_private_network_name = "{softlayer_private_network_name}"
+vm_sl_private_netmask = "{softlayer_private_netmask}"
+vm_network_gateway = "{sl_network_gateway_ip}"
+
+#dns servers you want to configure for the vm, it is an array and can be something like: [ "10.120.120.10", "10.120.120.11" ]
+vsphere_dns_servers = {dns_server_list}
+#search domain list. it is an array and can be something like: [ "wfss.ibm.com", "fss.ibm.com" ]
+virtual_machine_search_domain = {search_domain_list}
+#dns domain can be something like "wfss.ibm.com"
+vsphere_dns_domain = "{dns_domain_name}"

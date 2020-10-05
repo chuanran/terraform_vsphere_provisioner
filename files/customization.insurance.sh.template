@@ -1,0 +1,65 @@
+#!/bin/bash
+#This script is used to leverage TFD to customise configurations on fci insurance, and need to run on kube master vm
+orig_vm_type=$(echo "{vsphere_vm_hostname}" | awk -F "." '{print $1}' | awk -F "-" '{print $5}')
+if [ "$orig_vm_type" == "km" ]; then
+    fci_install_kit_dir="/root/fci-install-kit"
+    fcii_install_kit_dir="/root/fcii-install-kit"
+    km_fci_hosts_prop_file="${fci_install_kit_dir}/helm/install.hosts.properties"
+    km_fcii_install_properties_file="${fcii_install_kit_dir}/helm/install.properties"
+    km_fcii_values_yml_file="${fcii_install_kit_dir}/helm/fcii-values.yaml"
+    km_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-km/")
+    nfs1_hostname=$(echo "{vsphere_vm_hostname}" |  sed "s/-$orig_vm_type/-nfs1/")
+    if [ -s "$km_fci_hosts_prop_file" ]; then
+        if [ -d "${fcii_install_kit_dir}/helm" ]; then
+            cp -r ${km_fci_hosts_prop_file} ${fcii_install_kit_dir}/helm/
+        fi
+    fi
+    #update install.properties
+    if [ -s "$km_fcii_install_properties_file" ]; then
+        #backup install.properties
+        cp -r $km_fcii_install_properties_file ${fcii_install_kit_dir}/helm/install.properties-original
+        #change external.docker.registry.url, nfsserver.master.mount and external.nfsserver
+        grep -Eq "^external.docker.registry.url =" $km_fcii_install_properties_file
+        if [ $? -eq 0 ]; then
+            old_km_hostname=$(grep -E "^external.docker.registry.url =" $km_fcii_install_properties_file | awk -F "=" '{print $2}' | awk -F ":" '{print $1}' |  awk '{print $1}')
+            sed -i "s/$old_km_hostname/$km_hostname/g" $km_fcii_install_properties_file
+        else
+            echo "external.docker.registry.url = ${km_hostname}:5000" >> $km_fcii_install_properties_file
+        fi
+        grep -Eq "^external.nfsserver =" $km_fcii_install_properties_file
+        if [ $? -eq 0 ]; then
+            old_nfs1_hostname=$(grep -E "^external.nfsserver =" $km_fcii_install_properties_file | awk -F "=" '{print $2}' |  awk '{print $1}')
+            sed -i "s/$old_nfs1_hostname/$nfs1_hostname/g" $km_fcii_install_properties_file
+        else
+            echo "external.nfsserver = ${nfs1_hostname}" >> $km_fcii_install_properties_file
+        fi
+        grep -Eq "^nfsserver.master.mount =" $km_fcii_install_properties_file
+        if [ $? -eq 0 ]; then
+            old_nfs_master_mount=$(grep -E "^nfsserver.master.mount =" $km_fcii_install_properties_file | awk -F "=" '{print $2}' | awk -F "/" '{print $2}')
+            sed -i "s/^nfsserver.master.mount = \/$old_nfs_master_mount/nfsserver.master.mount = \/fcicore/g" $km_fcii_install_properties_file
+        else
+            echo "nfsserver.master.mount = /fcicore" >> $km_fcii_install_properties_file
+        fi
+    fi
+    #update fcii-values.yaml: change IDENTITY_SERVER_TYPE from 'msad' to 'sds'
+    if [ -s "$km_fcii_values_yml_file" ]; then
+        #backup fcii-values.yaml
+        cp -r $km_fcii_values_yml_file ${fcii_install_kit_dir}/helm/fcii-values.yaml-original
+        old_identity_server_type=$(grep -E "IDENTITY_SERVER_TYPE:" $km_fcii_values_yml_file | grep -v "#" | awk -F ":" '{print $2}' | awk '{print $1}')
+        sed -i "s/IDENTITY_SERVER_TYPE: $old_identity_server_type/IDENTITY_SERVER_TYPE: 'sds'/g" $km_fcii_values_yml_file
+    fi
+    #enable cognos
+    helm_fci_values_file="${fci_install_kit_dir}/helm/fci-values.yaml"
+    if [ -s "$helm_fci_values_file" ]; then
+        sed -i '/  cognos:/!b;n;c\    enabled: true' $helm_fci_values_file
+    fi
+        
+    #skip license accept
+    if [ ! -f "$fcii_install_kit_dir/helm/.acceptLicenseAgreement.lock" ]; then
+        touch $fcii_install_kit_dir/helm/.acceptLicenseAgreement.lock
+    fi
+    if [ ! -f "$fcii_install_kit_dir/helm/.acceptLicenseInformation.lock" ]; then
+        touch $fcii_install_kit_dir/helm/.acceptLicenseInformation.lock
+    fi
+fi
+
