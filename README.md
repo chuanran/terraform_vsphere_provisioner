@@ -25,7 +25,7 @@ Basically deployer just needs to manage one deployment manifest file that define
 
 Following is the work flow chart:
 
-![image](https://user-images.githubusercontent.com/3916517/95690393-6e3f7180-0be5-11eb-8d31-1cf2686904a8.png)
+![image](https://user-images.githubusercontent.com/3916517/95690584-dd699580-0be6-11eb-8bb4-9be285292038.png)
 
 
 # How to use TFD
