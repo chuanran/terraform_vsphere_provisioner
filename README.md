@@ -23,6 +23,11 @@ Scripts inside of this project will generate terraform configuration files for d
 
 Basically deployer just needs to manage one deployment manifest file that defined the configuration parameters of the infrastructure, and use this tool to clone template VMs to create new VMs, do the post customization like OS-level customization (ip allocation, dns setup, etc) and other customizations (product deployment manifest changes, product installation etc) after VMs booted up, and finally boot up an environment.
 
+Following is the work flow chart:
+
+![image](https://user-images.githubusercontent.com/3916517/95690393-6e3f7180-0be5-11eb-8d31-1cf2686904a8.png)
+
+
 # How to use TFD
 
 Deployer only needs two steps to use this tool:  
