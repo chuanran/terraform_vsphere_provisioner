@@ -9,9 +9,9 @@ This tool can be used to launch a relatively large-scale environment that is man
   - [Provision](#provision)
   - [ansible](#ansible)
   - [zabbix](#zabbix)
-  - [Install FCI platform] (#FCI_platform_install)
-  - [Install HDP platform] (#HDP_platform_install)
-  - [Install other FCI verticals] (#FCI_verticals_install)
+  - [Install FCI platform](#FCI_platform_install)
+  - [Install HDP platform](#HDP_platform_install)
+  - [Install other FCI verticals](#FCI_verticals_install)
    
    
 # Overview
